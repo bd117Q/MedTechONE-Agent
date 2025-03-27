@@ -112,7 +112,7 @@ async def main():
         st.write("Ask any question about MedTech Resources.")
 
     with col2:
-        st.image("assets/hamlyn_icon.png", width=120)
+        st.image("https://raw.githubusercontent.com/bd117Q/MedTechONE-Agent/main/crawl4AI-agent/assets/hamlyn_icon.png", width=120)
 
     # Initialize chat history in session state if not present
     if "messages" not in st.session_state:
