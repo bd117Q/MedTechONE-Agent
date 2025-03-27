@@ -111,8 +111,8 @@ async def main():
         st.title("MedTechONE AI Agent")
         st.write("Ask any question about MedTech Resources.")
 
-    # with col2:
-    #     st.image("Hamlyn Icon.png", caption="", width=120)  # Set a fixed width
+    with col2:
+        st.image("assets/Hamlyn Icon.png", width=120)
 
     # Initialize chat history in session state if not present
     if "messages" not in st.session_state:
