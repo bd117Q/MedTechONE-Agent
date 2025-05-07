@@ -241,6 +241,7 @@ async def get_page_content(ctx: RunContext[MedTechONEAIDeps], url: str) -> str:
 def list_airtable_resources(ctx: RunContext[MedTechONEAIDeps], filter_field: str = None, filter_value: str = None) -> str:
     """
     List resources from the Airtable 'Source repository' table, optionally filtered by a field and value.
+    Supports partial and synonym matching for themes (e.g., 'funding' matches 'Business Strategy & Funding').
     """
     table = Table(ctx.deps.airtable_token, ctx.deps.airtable_base_id, "Source repository")
     records = table.all()
@@ -250,11 +251,25 @@ def list_airtable_resources(ctx: RunContext[MedTechONEAIDeps], filter_field: str
         fields = rec.get("fields", {})
         if filter_field and filter_value:
             val = fields.get(filter_field)
-            if isinstance(val, list):
-                if filter_value not in val:
+            if filter_field.lower() == "theme" and filter_value:
+                # Partial/synonym match for theme
+                match = False
+                if isinstance(val, list):
+                    for v in val:
+                        if filter_value.lower() in v.lower():
+                            match = True
+                            break
+                elif isinstance(val, str):
+                    if filter_value.lower() in val.lower():
+                        match = True
+                if not match:
                     continue
-            elif val != filter_value:
-                continue
+            else:
+                if isinstance(val, list):
+                    if filter_value not in val:
+                        continue
+                elif val != filter_value:
+                    continue
         title = fields.get("Title", "Untitled")
         author = fields.get("Author", "")
         resource_type = ", ".join(fields.get("Type of Resource", [])) if isinstance(fields.get("Type of Resource"), list) else fields.get("Type of Resource", "")
