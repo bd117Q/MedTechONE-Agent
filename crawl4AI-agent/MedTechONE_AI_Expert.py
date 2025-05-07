@@ -10,8 +10,9 @@ import os
 from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.models.openai import OpenAIModel
 from openai import AsyncOpenAI
-from supabase import Client
+from supabase import Client, create_client
 from typing import List
+from pyairtable import Table
 
 load_dotenv()
 
@@ -24,6 +25,21 @@ logfire.configure(send_to_logfire='if-token-present')
 class MedTechONEAIDeps:
     supabase: Client
     openai_client: AsyncOpenAI
+    airtable_token: str
+    airtable_base_id: str
+
+openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+supabase: Client = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_SERVICE_KEY")
+)
+
+deps = MedTechONEAIDeps(
+    supabase=supabase,
+    openai_client=openai_client,
+    airtable_token=os.getenv("AIRTABLE_TOKEN"),
+    airtable_base_id=os.getenv("AIRTABLE_BASE_ID")
+)
 
 system_prompt = """
 MedTechONE Agentic RAG AI – System Prompt
@@ -35,6 +51,8 @@ Core Objective:
 ✅ Reference specific sections, articles, or linked resources from MedTechONE.
 ✅ Guide users to take action using site tools, checklists, and external links available through MedTechONE.
 ✅ Provide structured, clear responses that make navigating the site easier.
+✅ If the user asks about available resources, a list of resources, or to display all resources, ALWAYS use the Airtable resource tool to display all entries from the 'Source repository' table, unless a filter is specified. Display all relevant fields for each entry (Title, Author, Type of Resource, Description, Link to Resource, Theme, Topics, Access Type, Status, etc).
+✅ If the user asks where to find the resources table, or how to access the full list of resources, inform them that the resources table is available at [https://resources.medtechone-learning.com/](https://resources.medtechone-learning.com/) and provide this link in your response.
 
 How You Respond:
 
@@ -218,3 +236,60 @@ async def get_page_content(ctx: RunContext[MedTechONEAIDeps], url: str) -> str:
     except Exception as e:
         print(f"Error retrieving page content: {e}")
         return f"Error retrieving page content: {str(e)}"
+
+@MedTechONE_AI_Expert.tool
+def list_airtable_resources(ctx: RunContext[MedTechONEAIDeps], filter_field: str = None, filter_value: str = None) -> str:
+    """
+    List resources from the Airtable 'Source repository' table, optionally filtered by a field and value.
+    """
+    table = Table(ctx.deps.airtable_token, ctx.deps.airtable_base_id, "Source repository")
+    records = table.all()
+    print("Number of records fetched:", len(records))  # Debug print
+    results = []
+    for rec in records:
+        fields = rec.get("fields", {})
+        if filter_field and filter_value:
+            val = fields.get(filter_field)
+            if isinstance(val, list):
+                if filter_value not in val:
+                    continue
+            elif val != filter_value:
+                continue
+        title = fields.get("Title", "Untitled")
+        author = fields.get("Author", "")
+        resource_type = ", ".join(fields.get("Type of Resource", [])) if isinstance(fields.get("Type of Resource"), list) else fields.get("Type of Resource", "")
+        description = fields.get("Description", "")
+        link = fields.get("Link to Resource", "")
+        theme = ", ".join(fields.get("Theme", [])) if isinstance(fields.get("Theme", []), list) else fields.get("Theme", "")
+        topics = ", ".join(fields.get("Topics", [])) if isinstance(fields.get("Topics", []), list) else fields.get("Topics", "")
+        access_type = fields.get("Access Type", "")
+        status = fields.get("Status", "")
+        results.append(
+            f"- **[{title}]({link})**\n"
+            f"  - Author: {author}\n"
+            f"  - Type: {resource_type}\n"
+            f"  - Theme: {theme}\n"
+            f"  - Topics: {topics}\n"
+            f"  - Access: {access_type}\n"
+            f"  - Status: {status}\n"
+            f"  - Description: {description}\n"
+        )
+    if not results:
+        return "No resources found."
+    return "\n\n".join(results)
+
+if __name__ == "__main__":
+    from pyairtable import Table
+    AIRTABLE_TOKEN = "patVw4ArosMIMAuuv.d8ca25e8659973be14c7aea8ae73ed3ecd936436a6d87a03028ddc589e07f54c"
+    BASE_ID = "appzeMbm9zS6M0AM9"
+    from pyairtable import Api
+    api = Api(AIRTABLE_TOKEN)
+    base = api.base(BASE_ID)
+    print("Airtable tables in base:")
+    for table in base.tables():
+        print(f"Table: {table.name}")
+        tbl = Table(AIRTABLE_TOKEN, BASE_ID, table.name)
+        records = tbl.all()
+        print(f"  {len(records)} records:")
+        for rec in records:
+            print(rec)

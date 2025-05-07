@@ -73,7 +73,9 @@ async def run_agent_with_streaming(user_input: str):
     # Prepare dependencies
     deps = MedTechONEAIDeps(
         supabase=supabase,
-        openai_client=openai_client
+        openai_client=openai_client,
+        airtable_token=os.getenv("AIRTABLE_TOKEN"),
+        airtable_base_id=os.getenv("AIRTABLE_BASE_ID")
     )
 
     # Run the agent in a stream
