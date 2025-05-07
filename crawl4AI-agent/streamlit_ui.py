@@ -22,7 +22,7 @@ from pydantic_ai.messages import (
     RetryPromptPart,
     ModelMessagesTypeAdapter
 )
-from pydantic_ai_expert import pydantic_ai_expert, PydanticAIDeps
+from MedTechONE_AI_Expert import MedTechONE_AI_Expert, MedTechONEAIDeps
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -71,13 +71,13 @@ async def run_agent_with_streaming(user_input: str):
     while maintaining the entire conversation in `st.session_state.messages`.
     """
     # Prepare dependencies
-    deps = PydanticAIDeps(
+    deps = MedTechONEAIDeps(
         supabase=supabase,
         openai_client=openai_client
     )
 
     # Run the agent in a stream
-    async with pydantic_ai_expert.run_stream(
+    async with MedTechONE_AI_Expert.run_stream(
         user_input,
         deps=deps,
         message_history= st.session_state.messages[:-1],  # pass entire conversation so far
