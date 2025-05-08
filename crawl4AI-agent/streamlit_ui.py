@@ -43,11 +43,6 @@ try:
         
     supabase: Client = Client(supabase_url, supabase_key)
     
-    # Test Supabase connection
-    test_result = supabase.from_('site_pages').select('count').limit(1).execute()
-    if not test_result:
-        raise ConnectionError("Failed to connect to Supabase database")
-
     # Verify Airtable credentials
     airtable_token = os.getenv("AIRTABLE_TOKEN")
     airtable_base_id = os.getenv("AIRTABLE_BASE_ID")
@@ -55,33 +50,27 @@ try:
     if not airtable_token or not airtable_base_id:
         raise ValueError("AIRTABLE_TOKEN or AIRTABLE_BASE_ID environment variables are not set")
         
-    # Test Airtable connection
-    from pyairtable import Api
-    api = Api(airtable_token)
-    base = api.base(airtable_base_id)
-    
-    # List available tables
-    tables = base.tables()
-    print(f"Available Airtable tables: {[table.name for table in tables]}")
-    
-    if "Source repository" not in [table.name for table in tables]:
-        raise ValueError("'Source repository' table not found in Airtable base")
-        
-    # Test table access
-    from pyairtable import Table
-    test_table = Table(airtable_token, airtable_base_id, "Source repository")
-    test_records = test_table.all(limit=1)
-    if not test_records:
-        print("Warning: No records found in Airtable 'Source repository' table")
-    else:
-        print(f"Successfully connected to Airtable. Found {len(test_records)} test records.")
-        
 except Exception as e:
     st.error(f"Error initializing clients: {str(e)}")
     st.stop()
 
 # Configure logfire to suppress warnings (optional)
 logfire.configure(send_to_logfire='never')
+
+# Cache for Airtable records
+@st.cache_data(ttl=3600)  # Cache for 1 hour
+def get_airtable_records():
+    """Get records from Airtable with caching."""
+    try:
+        from pyairtable import Table
+        table = Table(airtable_token, airtable_base_id, "Source repository")
+        return table.all(max_records=100)
+    except Exception as e:
+        print(f"Error fetching Airtable records: {e}")
+        return []
+
+# Initialize the cache
+airtable_records = get_airtable_records()
 
 class ChatMessage(TypedDict):
     """Format of messages sent to the browser/API."""

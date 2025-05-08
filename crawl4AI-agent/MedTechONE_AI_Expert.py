@@ -54,7 +54,9 @@ deps = MedTechONEAIDeps(
 system_prompt = """
 MedTechONE Agentic RAG AI – System Prompt
 Role:
-You are the MedTechONE AI Assistant, an expert guide designed to help users navigate and maximize the resources available on the MedTechONE Knowledge Hub. Your primary function is to help MedTech researchers find relevant information, resources, and links within the site to assist them in overcoming regulatory, business, and funding challenges when bringing a medical device to market. You have been trained on the web pages currently available on the MedTechONE site.
+You are the MedTechONE AI Assistant, an expert guide designed to help users navigate and maximize the resources available on the MedTechONE Knowledge Hub. 
+Your primary function is to help MedTech researchers find relevant information, resources, and links within the site to assist them in overcoming regulatory, business, and funding challenges when bringing a medical device to market. 
+You have been trained on the web pages currently available on the MedTechONE site.
 
 Site Structure:
 The MedTechONE Knowledge Hub is organized as follows:
@@ -67,14 +69,17 @@ The MedTechONE Knowledge Hub is organized as follows:
 
 Core Objective:
 ✅ Help users find the most relevant content on MedTechONE based on their questions.
-✅ Reference specific sections, articles, or linked resources from MedTechONE.
-✅ Guide users to take action using site tools, checklists, and external links available through MedTechONE.
+✅ Explain how the site is structured and how to use the resources available when they ask.
+✅ Reference specific content, or linked resources from MedTechONE.
+✅ Guide users to take action using site pages, PDF's, and external links available through MedTechONE.
 ✅ Provide structured, clear responses that make navigating the site easier.
 ✅ IMPORTANT: When ANY user asks about a topic, resources, or information, you MUST:
   1. First provide a brief overview of the topic from the documentation
   2. Then ALWAYS use the list_airtable_resources tool to show ALL relevant resources
   3. Filter the resources by the specific topic if mentioned
   4. Display ALL fields for each resource (Title, Author, Type of Resource, Description, Link to Resource, Theme, Topics, Access Type, Status)
+  5. Provide a link to the resource in the response as a clickable link.
+  6. Link the most relevant topic page on the site to the user in the response, if it exists, for example: https://medtechone-learning.com/clinical-trials (for information on clinical trials).
 ✅ If the user asks where to find the resources table, or how to access the full list of resources, inform them that the resources table is available at [https://resources.medtechone-learning.com/](https://resources.medtechone-learning.com/) and provide this link in your response.
 
 How You Respond:
@@ -331,75 +336,53 @@ def list_airtable_resources(ctx: RunContext[MedTechONEAIDeps], filter_field: str
     """
     try:
         print("Starting Airtable resource listing...")
-        
-        # First, let's just try to get ALL records without any filtering
         table = Table(ctx.deps.airtable_token, ctx.deps.airtable_base_id, "Source repository")
-        print("Table object created, attempting to fetch records...")
         
-        try:
-            # Get all records first to verify access
-            all_records = table.all()
-            print(f"Successfully retrieved {len(all_records)} total records")
-            
-            if not all_records:
-                return "No resources found in the database. The Airtable base appears to be empty."
-            
-            # If we have a filter, apply it to the records we already have
-            if filter_field and filter_value:
-                print(f"Filtering records for {filter_field}: {filter_value}")
-                filtered_records = []
-                search_terms = [
-                    filter_value.lower(),
-                    filter_value.lower().replace('-', ' '),
-                    filter_value.lower().replace(' ', '-'),
-                    filter_value.lower().replace('clinical', 'clinic'),
-                    filter_value.lower().replace('preclinical', 'pre-clinical'),
-                    filter_value.lower().replace('pre-clinical', 'preclinical')
-                ]
-                search_terms = list(set(search_terms))  # Remove duplicates
-                print(f"Searching with terms: {search_terms}")
-                
-                for record in all_records:
-                    fields = record.get("fields", {})
-                    # Check all relevant fields
-                    if any(
-                        any(term in str(fields.get(field, "")).lower() for term in search_terms)
-                        for field in ["Title", "Description", "Topics", "Theme"]
-                    ):
-                        filtered_records.append(record)
-                
-                print(f"Found {len(filtered_records)} matching records")
-                records = filtered_records
-            else:
-                records = all_records
-            
-            # Format the results
-            results = []
-            for rec in records:
-                fields = rec.get("fields", {})
-                entry = []
-                for key in [
-                    "Title", "Author", "Type of Resource", "Description", 
-                    "Link to Resource", "Theme", "Topics", "Access Type", 
-                    "Display resource on topic page", "Status"
-                ]:
-                    if key in fields:
-                        value = fields[key]
-                        if isinstance(value, list):
-                            value = ", ".join(value)
-                        entry.append(f"**{key}:** {value}")
-                if entry:
-                    results.append("\n".join(entry))
-            
-            if not results:
-                return "No resources found matching your criteria."
-            
-            return "\n\n---\n\n".join(results)
-            
-        except Exception as e:
-            print(f"Error accessing Airtable records: {str(e)}")
-            return f"Error accessing resources: {str(e)}"
-            
+        # Get records (will use cached version if available)
+        records = table.all(max_records=100)
+        print(f"Retrieved {len(records)} records from Airtable")
+        
+        if not records:
+            return "No resources found in the database."
+        
+        # Apply filtering if needed
+        if filter_field and filter_value:
+            search_term = filter_value.lower()
+            records = [
+                rec for rec in records
+                if any(
+                    search_term in str(rec.get("fields", {}).get(field, "")).lower()
+                    for field in ["Title", "Description", "Topics", "Theme"]
+                )
+            ]
+            print(f"Filtered to {len(records)} matching records")
+        
+        if not records:
+            return "No resources found matching your criteria."
+        
+        # Format the results
+        results = []
+        for rec in records:
+            fields = rec.get("fields", {})
+            entry = []
+            for key in [
+                "Title", "Author", "Type of Resource", "Description", 
+                "Link to Resource", "Theme", "Topics", "Access Type", 
+                "Display resource on topic page", "Status"
+            ]:
+                if key in fields:
+                    value = fields[key]
+                    if isinstance(value, list):
+                        value = ", ".join(value)
+                    entry.append(f"**{key}:** {value}")
+            if entry:
+                results.append("\n".join(entry))
+        
+        if not results:
+            return "No resources found with the required fields."
+        
+        return "\n\n---\n\n".join(results)
+        
     except Exception as e:
         print(f"Error in list_airtable_resources: {str(e)}")
         return f"Error listing resources: {str(e)}"
