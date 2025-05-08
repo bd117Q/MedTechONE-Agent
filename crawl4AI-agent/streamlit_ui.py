@@ -8,6 +8,7 @@ import json
 import logfire
 from supabase import Client
 from openai import AsyncOpenAI
+import httpx
 
 # Import all the message part classes
 from pydantic_ai.messages import (
@@ -28,11 +29,56 @@ from MedTechONE_AI_Expert import MedTechONE_AI_Expert, MedTechONEAIDeps
 from dotenv import load_dotenv
 load_dotenv()
 
-openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-supabase: Client = Client(
-    os.getenv("SUPABASE_URL"),
-    os.getenv("SUPABASE_SERVICE_KEY")
-)
+# Initialize clients with error handling
+try:
+    openai_client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    if not os.getenv("OPENAI_API_KEY"):
+        raise ValueError("OPENAI_API_KEY environment variable is not set")
+
+    supabase_url = os.getenv("SUPABASE_URL")
+    supabase_key = os.getenv("SUPABASE_SERVICE_KEY")
+    
+    if not supabase_url or not supabase_key:
+        raise ValueError("SUPABASE_URL or SUPABASE_SERVICE_KEY environment variables are not set")
+        
+    supabase: Client = Client(supabase_url, supabase_key)
+    
+    # Test Supabase connection
+    test_result = supabase.from_('site_pages').select('count').limit(1).execute()
+    if not test_result:
+        raise ConnectionError("Failed to connect to Supabase database")
+
+    # Verify Airtable credentials
+    airtable_token = os.getenv("AIRTABLE_TOKEN")
+    airtable_base_id = os.getenv("AIRTABLE_BASE_ID")
+    
+    if not airtable_token or not airtable_base_id:
+        raise ValueError("AIRTABLE_TOKEN or AIRTABLE_BASE_ID environment variables are not set")
+        
+    # Test Airtable connection
+    from pyairtable import Api
+    api = Api(airtable_token)
+    base = api.base(airtable_base_id)
+    
+    # List available tables
+    tables = base.tables()
+    print(f"Available Airtable tables: {[table.name for table in tables]}")
+    
+    if "Source repository" not in [table.name for table in tables]:
+        raise ValueError("'Source repository' table not found in Airtable base")
+        
+    # Test table access
+    from pyairtable import Table
+    test_table = Table(airtable_token, airtable_base_id, "Source repository")
+    test_records = test_table.all(limit=1)
+    if not test_records:
+        print("Warning: No records found in Airtable 'Source repository' table")
+    else:
+        print(f"Successfully connected to Airtable. Found {len(test_records)} test records.")
+        
+except Exception as e:
+    st.error(f"Error initializing clients: {str(e)}")
+    st.stop()
 
 # Configure logfire to suppress warnings (optional)
 logfire.configure(send_to_logfire='never')
@@ -78,32 +124,50 @@ async def run_agent_with_streaming(user_input: str):
         airtable_base_id=os.getenv("AIRTABLE_BASE_ID")
     )
 
-    # Run the agent in a stream
-    async with MedTechONE_AI_Expert.run_stream(
-        user_input,
-        deps=deps,
-        message_history= st.session_state.messages[:-1],  # pass entire conversation so far
-    ) as result:
-        # We'll gather partial text to show incrementally
-        partial_text = ""
-        message_placeholder = st.empty()
+    max_retries = 3
+    retry_delay = 1  # seconds
 
-        # Render partial text as it arrives
-        async for chunk in result.stream_text(delta=True):
-            partial_text += chunk
-            message_placeholder.markdown(partial_text)
+    for attempt in range(max_retries):
+        try:
+            # Run the agent in a stream
+            async with MedTechONE_AI_Expert.run_stream(
+                user_input,
+                deps=deps,
+                message_history=st.session_state.messages[:-1],  # pass entire conversation so far
+            ) as result:
+                # We'll gather partial text to show incrementally
+                partial_text = ""
+                message_placeholder = st.empty()
 
-        # Now that the stream is finished, we have a final result.
-        # Add new messages from this run, excluding user-prompt messages
-        filtered_messages = [msg for msg in result.new_messages() 
-                            if not (hasattr(msg, 'parts') and 
-                                    any(part.part_kind == 'user-prompt' for part in msg.parts))]
-        st.session_state.messages.extend(filtered_messages)
+                # Render partial text as it arrives
+                async for chunk in result.stream_text(delta=True):
+                    partial_text += chunk
+                    message_placeholder.markdown(partial_text)
 
-        # Add the final response to the messages
-        st.session_state.messages.append(
-            ModelResponse(parts=[TextPart(content=partial_text)])
-        )
+                # Now that the stream is finished, we have a final result.
+                # Add new messages from this run, excluding user-prompt messages
+                filtered_messages = [msg for msg in result.new_messages() 
+                                    if not (hasattr(msg, 'parts') and 
+                                            any(part.part_kind == 'user-prompt' for part in msg.parts))]
+                st.session_state.messages.extend(filtered_messages)
+
+                # Add the final response to the messages
+                st.session_state.messages.append(
+                    ModelResponse(parts=[TextPart(content=partial_text)])
+                )
+                return  # Success - exit the retry loop
+
+        except httpx.RemoteProtocolError as e:
+            if attempt < max_retries - 1:
+                st.warning(f"Connection error occurred. Retrying in {retry_delay} seconds...")
+                await asyncio.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                st.error("Failed to get a complete response after multiple attempts. Please try again.")
+                raise
+        except Exception as e:
+            st.error(f"An error occurred: {str(e)}")
+            raise
 
 
 async def main():
